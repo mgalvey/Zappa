@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import time
 import zipfile
+import glob
 
 import kappa
 from distutils.dir_util import copy_tree
@@ -163,7 +164,8 @@ ATTACH_POLICY = """{
 }"""
 
 RESPONSE_TEMPLATE = """#set($inputRoot = $input.path('$'))\n$inputRoot.Content"""
-ERROR_RESPONSE_TEMPLATE = """#set($inputRoot = $input.path('$.errorMessage'))\n$util.base64Decode($inputRoot)"""
+# ERROR_RESPONSE_TEMPLATE = """#set($inputRoot = $input.path('$.errorMessage'))\n$util.base64Decode($inputRoot)"""
+ERROR_RESPONSE_TEMPLATE = """#set($_body = $util.parseJson($input.path('$.errorMessage'))['content'])\n$util.base64Decode($_body)"""
 REDIRECT_RESPONSE_TEMPLATE = ""
 
 API_GATEWAY_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-northeast-1', 'ap-southeast-2']
@@ -336,8 +338,18 @@ class Zappa(object):
         if minify:
             excludes = ZIP_EXCLUDES + exclude
             copytree(site_packages, temp_package_path, symlinks=False, ignore=shutil.ignore_patterns(*excludes))
+            egglinks = glob.glob(site_packages + "/*.egg-link")
+            for link in egglinks:
+                with open(link, 'r') as f:
+                    linkpath = str(f.readline()).strip()
+                    copytree(linkpath, temp_package_path, symlinks=False, ignore=shutil.ignore_patterns(*excludes))
         else:
             copytree(site_packages, temp_package_path, symlinks=False)
+            egglinks = glob.glob(site_packages + "/*.egg-link")
+            for link in egglinks:
+                with open(link, 'r') as f:
+                    linkpath = str(f.readline()).strip()
+                    copytree(linkpath, temp_package_path, symlinks=False)
 
         # We may have 64-bin specific packages too.
         site_packages_64 = os.path.join(venv, 'lib64', 'python2.7', 'site-packages')
@@ -345,8 +357,18 @@ class Zappa(object):
             if minify:
                 excludes = ZIP_EXCLUDES + exclude
                 copytree(site_packages_64, temp_package_path, symlinks=False, ignore=shutil.ignore_patterns(*excludes))
+                egglinks = glob.glob(site_packages_64 + "/*.egg-link")
+                for link in egglinks:
+                    with open(link, 'r') as f:
+                        linkpath = str(f.readline()).strip()
+                        copytree(linkpath, temp_package_path, symlinks=False, ignore=shutil.ignore_patterns(*excludes))
             else:
                 copytree(site_packages_64, temp_package_path, symlinks=False)
+                egglinks = glob.glob(site_packages_64 + "/*.egg-link")
+                for link in egglinks:
+                    with open(link, 'r') as f:
+                        linkpath = str(f.readline()).strip()
+                        copytree(linkpath, temp_package_path, symlinks=False)
 
         copy_tree(temp_package_path, temp_project_path, update=True)
 
@@ -929,10 +951,10 @@ class Zappa(object):
 
         return None
 
-    def create_domain_name( self, 
-                            domain_name, 
-                            certificate_name, 
-                            certificate_body, 
+    def create_domain_name( self,
+                            domain_name,
+                            certificate_name,
+                            certificate_body,
                             certificate_private_key,
                             certificate_chain,
                             lambda_name,
@@ -992,9 +1014,9 @@ class Zappa(object):
         return response
 
     def update_domain_name( self,
-                            domain_name, 
-                            certificate_name, 
-                            certificate_body, 
+                            domain_name,
+                            certificate_name,
+                            certificate_body,
                             certificate_private_key,
                             certificate_chain,
                         ):
@@ -1004,7 +1026,7 @@ class Zappa(object):
 
         # Patch operations described here: https://tools.ietf.org/html/rfc6902#section-4
         # and here: http://boto3.readthedocs.io/en/latest/reference/services/apigateway.html#APIGateway.Client.update_domain_name
-        
+
         new_cert_name = 'LEZappa' + str(time.time())
         server_certificate = self.iam.create_server_certificate(
             ServerCertificateName=new_cert_name,
@@ -1186,9 +1208,9 @@ class Zappa(object):
                 svc = ','.join(event['event_source']['events'])
                 service = svc.split(':')[0]
 
-                self.create_event_permission(   
-                                                lambda_name, 
-                                                service + '.amazonaws.com', 
+                self.create_event_permission(
+                                                lambda_name,
+                                                service + '.amazonaws.com',
                                                 event['event_source']['arn']
                                             )
 
@@ -1499,7 +1521,7 @@ class Zappa(object):
         if status_code in ['301', '302']:
             pattern = 'https://.*|/.*'
         elif status_code != '200':
-            pattern = base64.b64encode("<!DOCTYPE html>" + str(status_code)) + '.*'
+            pattern = '\{"http_status": ' + str(status_code) + '.*'
             pattern = pattern.replace('+', r"\+")
 
         return pattern
